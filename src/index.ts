@@ -27,6 +27,7 @@ import {
   maintainInstagramAccessToken,
   type InstagramTokenStatus
 } from "./instagram-token";
+import { extractCaptionLink, fillLink } from "./caption-link";
 import { isBasicallyKeyword } from "./keyword-match";
 import { getSentDms, getSentDmSummary, renderSentDmsPage, renderSentRows, renderSentSummary } from "./sent-dms";
 import {
@@ -50,7 +51,10 @@ type SecretEnv = {
   OWNER_IG_USERNAME?: string;
 };
 
-type AppEnv = Cloudflare.Env & SecretEnv;
+type AppEnv = Cloudflare.Env & SecretEnv & {
+  // When set, {link} in a reply becomes the first link to this host in the post caption.
+  CAPTION_LINK_HOST?: string;
+};
 
 type InstagramWebhookPayload = {
   object?: string;
@@ -92,6 +96,7 @@ type MatchedRule = Rule & {
 
 type RetryEventRow = {
   comment_id: string;
+  media_id: string | null;
   matched_rule_id: number | null;
   matched_keyword: string | null;
   rule_label: string | null;
@@ -315,14 +320,16 @@ async function processCommentEvent(event: CommentEvent, env: AppEnv): Promise<vo
     return;
   }
 
+  const captionLink = await resolveCaptionLink(env, event.mediaId);
+
   if (isDryRun(env)) {
     await updateStatus(env.DB, event.commentId, "dry_run_matched", true, rule);
-    console.log(JSON.stringify({ level: "info", msg: "dry_run_private_reply", event, rule: summarizeRule(rule) }));
+    console.log(JSON.stringify({ level: "info", msg: "dry_run_private_reply", event, rule: summarizeRule(rule), captionLink }));
     return;
   }
 
   try {
-    const result = await sendRuleResponses(env, event.commentId, rule);
+    const result = await sendRuleResponses(env, event.commentId, rule, captionLink);
     await updateEventAfterSend(env.DB, event.commentId, rule, result);
   } catch (error) {
     await recordCommentSendError(env.DB, event.commentId, rule, error);
@@ -379,13 +386,14 @@ async function recordCommentSendError(
 async function sendRuleResponses(
   env: AppEnv,
   commentId: string,
-  rule: MatchedRule
+  rule: MatchedRule,
+  captionLink: string | null = null
 ): Promise<SendRuleResult> {
   const privateReply = await sendPrivateReply(
     env,
     commentId,
-    rule.replyText,
-    rule.linkUrl,
+    fillLink(rule.replyText, captionLink ?? rule.linkUrl ?? homepageLink(env)),
+    captionLink ?? rule.linkUrl,
     rule.linkButtonLabel
   );
   return completeCommentResponses(env, commentId, privateReply, rule.publicReplyText);
@@ -521,7 +529,7 @@ async function processMessageEvent(event: DmEvent, env: AppEnv): Promise<void> {
     return;
   }
 
-  const reply = await resolveReply(env.DB, replyKey, settings);
+  const reply = await resolveReply(env, replyKey, settings);
   if (paused) {
     await updateMessageStatus(env.DB, event.messageId, "ignored_paused", { replyKey, label: pausedLabel ?? reply?.label ?? replyKey });
     return;
@@ -559,19 +567,23 @@ function messageChannel(event: DmEvent): Channel | null {
   return event.source === "story_reply" ? "stories" : "dms";
 }
 
-async function resolveReply(db: D1Database, key: string, settings: DmFeatureSettings): Promise<ResolvedReply | null> {
+async function resolveReply(env: AppEnv, key: string, settings: DmFeatureSettings): Promise<ResolvedReply | null> {
   const target = parseReplyKey(key);
   if (!target) {
     return null;
   }
   if (target.type === "rule") {
-    const rule = await getRuleById(db, target.ruleId);
+    const rule = await getRuleById(env.DB, target.ruleId);
     return rule
       ? {
         key,
         label: rule.label,
         paused: !rule.active,
-        message: buildPrivateReplyMessage(rule.replyText, rule.linkUrl, rule.linkButtonLabel)
+        message: buildPrivateReplyMessage(
+          fillLink(rule.replyText, rule.linkUrl ?? homepageLink(env)),
+          rule.linkUrl,
+          rule.linkButtonLabel
+        )
       }
       : null;
   }
@@ -843,6 +855,42 @@ async function sendPublicCommentReply(
   }
 
   return parsed ?? responseText;
+}
+
+function homepageLink(env: AppEnv): string | null {
+  const host = env.CAPTION_LINK_HOST?.trim();
+  return host ? `https://${host}/` : null;
+}
+
+// A failed lookup must never block the DM: the reply falls back to the rule's link.
+async function resolveCaptionLink(env: AppEnv, mediaId: string | null): Promise<string | null> {
+  if (!mediaId || !env.CAPTION_LINK_HOST?.trim()) {
+    return null;
+  }
+
+  try {
+    const base = (env.GRAPH_API_BASE ?? DEFAULT_GRAPH_API_BASE).replace(/\/$/, "");
+    const endpoint = new URL(`${base}/${encodeURIComponent(mediaId)}`);
+    endpoint.searchParams.set("fields", "caption");
+    const response = await fetch(endpoint.toString(), {
+      headers: { "authorization": `Bearer ${await getInstagramAccessToken(env)}` }
+    });
+    const responseText = await response.text();
+    if (!response.ok) {
+      throw new Error(`Meta API ${response.status}: ${responseText}`);
+    }
+    const parsed = parseJsonText(responseText);
+    const caption = parsed && typeof parsed === "object" ? getString(parsed as Record<string, unknown>, "caption") : null;
+    return extractCaptionLink(caption, env.CAPTION_LINK_HOST);
+  } catch (error) {
+    console.warn(JSON.stringify({
+      level: "warn",
+      msg: "caption_lookup_failed",
+      mediaId,
+      error: error instanceof Error ? error.message : String(error)
+    }));
+    return null;
+  }
 }
 
 function buildPrivateReplyMessage(
@@ -1287,7 +1335,7 @@ async function handleRetryEvent(request: Request, env: AppEnv, commentId: string
         event.sent_at ?? new Date().toISOString()
       );
     } else {
-      result = await sendRuleResponses(env, commentId, matchedRule);
+      result = await sendRuleResponses(env, commentId, matchedRule, await resolveCaptionLink(env, event.media_id));
     }
     await updateEventAfterSend(env.DB, commentId, matchedRule, result);
   } catch (error) {
@@ -1332,7 +1380,7 @@ async function getRuleById(db: D1Database, ruleId: number): Promise<Rule | null>
 
 async function getRetryEvent(db: D1Database, commentId: string): Promise<RetryEventRow | null> {
   return db.prepare(
-    `SELECT comment_id, matched_rule_id, matched_keyword, rule_label, status, sent_at, meta_response
+    `SELECT comment_id, media_id, matched_rule_id, matched_keyword, rule_label, status, sent_at, meta_response
      FROM comment_events
      WHERE comment_id = ?`
   )

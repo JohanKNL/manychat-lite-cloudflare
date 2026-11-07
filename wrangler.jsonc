@@ -16,8 +16,9 @@
 	},
 	"vars": {
 		"GRAPH_API_BASE": "https://graph.instagram.com/v25.0",
-		"KEYWORD": "guide",
+		"KEYWORD": "",
 		"PRIVATE_REPLY_TEXT": "Thanks for commenting. Here is the link: https://example.com",
+		"CAPTION_LINK_HOST": "keukenliefde.nl",
 		"DRY_RUN": "true"
 	},
 	"d1_databases": [
