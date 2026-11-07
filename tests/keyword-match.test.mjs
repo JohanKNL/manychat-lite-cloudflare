@@ -35,6 +35,8 @@ test("the matcher accepts short requests and rejects conversation", () => {
     ["GUIDE", "guide"], ["guide please 🙏", "guide"], ["#guide", "guide"], ["Please send me the BOOKS links", "books"],
     ["Mail!", "mail"], ["@yourhandle guide please", "guide"], ["free guide", "guide"], ["Free guide", "free guide"],
     ["can I get the guide pls", "guide"], ["audio_book", "audio_book"],
+    ["Recept!", "recept"], ["recept graag", "recept"], ["Ja graag het recept", "recept"],
+    ["Stuur mij het recept alsjeblieft 🙏", "recept"], ["Kan ik het recept krijgen?", "recept"], ["Recept, dankjewel", "recept"],
   ];
   for (const [text, keyword] of yes) assert.equal(isBasicallyKeyword(text, keyword), true, `${text} / ${keyword}`);
   const no = [
@@ -44,6 +46,9 @@ test("the matcher accepts short requests and rejects conversation", () => {
     ["I loved your guide last week, it was great", "guide", "too_long"],
     ["Guidelines please", "guide", "missing"],
     ["audio_book", "audio", "missing"],
+    ["Wat een lekker mooi recept", "recept", "extra_words"],
+    ["Ik maak dit recept al jaren vaak voor mijn kinderen", "recept", "too_long"],
+    ["Receptenboek graag", "recept", "missing"],
     ["", "guide", "missing"],
     ["guide", "", "missing"],
   ];

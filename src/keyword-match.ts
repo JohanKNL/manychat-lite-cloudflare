@@ -18,6 +18,9 @@ export function keywordMatch(text: string, keyword: string): KeywordMatch {
     "please", "pls", "plz", "send", "get", "can", "could", "would", "want", "need",
     "link", "links", "info", "dm", "dms", "here", "now", "yes", "yeah", "yep", "ok", "okay",
     "hi", "hey", "hello", "thanks", "thank", "thx", "ty", "copy", "version",
+    "mij", "mijn", "ik", "jij", "je", "jou", "het", "de", "een", "en", "of", "ook", "even", "naar", "voor",
+    "graag", "alsjeblieft", "asjeblieft", "alstublieft", "stuur", "stuurt", "sturen", "krijg", "krijgen",
+    "kan", "kun", "zou", "wil", "wilt", "hier", "nu", "ja", "hoi", "hallo", "dank", "dankje", "dankjewel", "bedankt", "bvd",
   ]);
   const words = (value: string) => value.normalize("NFKC").toLowerCase()
     .replace(/@[\p{L}\p{N}._]+/gu, " ")
