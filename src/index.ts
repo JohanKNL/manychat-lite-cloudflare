@@ -27,8 +27,10 @@ import {
   maintainInstagramAccessToken,
   type InstagramTokenStatus
 } from "./instagram-token";
+import { sendAlert } from "./alerts";
 import { extractCaptionLink, fillLink } from "./caption-link";
 import { isBasicallyKeyword } from "./keyword-match";
+import { deleteOldEvents, retentionDays } from "./retention";
 import { getSentDms, getSentDmSummary, renderSentDmsPage, renderSentRows, renderSentSummary } from "./sent-dms";
 import {
   CHANNELS,
@@ -54,6 +56,9 @@ type SecretEnv = {
 type AppEnv = Cloudflare.Env & SecretEnv & {
   // When set, {link} in a reply becomes the first link to this host in the post caption.
   CAPTION_LINK_HOST?: string;
+  RETENTION_DAYS?: string;
+  TELEGRAM_BOT_TOKEN?: string;
+  TELEGRAM_CHAT_ID?: string;
 };
 
 type InstagramWebhookPayload = {
@@ -140,15 +145,25 @@ const DM_FEATURE_PATHS = new Set([
 ]);
 
 export default {
-  // Daily cron (wrangler.jsonc): check the Instagram connection and renew the
-  // token before it expires. Skipped in test mode.
+  // Daily cron (wrangler.jsonc): delete old comments and DMs, then check the
+  // Instagram connection and renew the token before it expires. The connection
+  // check is skipped in test mode.
   async scheduled(_controller: ScheduledController, env: AppEnv): Promise<void> {
+    const deleted = await deleteOldEvents(env.DB, retentionDays(env.RETENTION_DAYS));
+    console.log(JSON.stringify({ level: "info", msg: "old_events_deleted", ...deleted }));
     if (isDryRun(env)) {
       return;
     }
-    const status = await maintainInstagramAccessToken(env);
+    let status;
+    try {
+      status = await maintainInstagramAccessToken(env);
+    } catch (error) {
+      await alertConnection(env, error instanceof Error ? error.message : String(error));
+      throw error;
+    }
     console.log(JSON.stringify({ level: "info", msg: "instagram_connection_check", ...status }));
     if (status.state === "error" || status.needsReconnect) {
+      await alertConnection(env, status.error ?? "Instagram connection needs attention.");
       throw new Error(status.error ?? "Instagram connection needs attention.");
     }
   },
@@ -333,7 +348,17 @@ async function processCommentEvent(event: CommentEvent, env: AppEnv): Promise<vo
     await updateEventAfterSend(env.DB, event.commentId, rule, result);
   } catch (error) {
     await recordCommentSendError(env.DB, event.commentId, rule, error);
+    await alertSendFailure(env, error);
   }
+}
+
+function alertConnection(env: AppEnv, reason: string): Promise<void> {
+  return sendAlert(env, "connection", `Brievenbus: de Instagram-koppeling heeft aandacht nodig. ${reason}`, 24 * 60 * 60 * 1000);
+}
+
+function alertSendFailure(env: AppEnv, error: unknown): Promise<void> {
+  const reason = error instanceof Error ? error.message : String(error);
+  return sendAlert(env, "send_error", `Brievenbus: een DM kon niet worden verstuurd. ${reason}`);
 }
 
 function isDryRun(env: AppEnv): boolean {
@@ -556,6 +581,7 @@ async function processMessageEvent(event: DmEvent, env: AppEnv): Promise<void> {
     const message = error instanceof Error ? error.message : String(error);
     await updateMessageStatus(env.DB, event.messageId, "send_error", { replyKey, label: reply.label, error: message });
     console.error(JSON.stringify({ level: "error", msg: "dm_reply_failed", messageId: event.messageId, error: message }));
+    await alertSendFailure(env, error);
   }
 }
 

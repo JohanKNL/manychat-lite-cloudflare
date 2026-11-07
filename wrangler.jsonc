@@ -19,6 +19,7 @@
 		"KEYWORD": "",
 		"PRIVATE_REPLY_TEXT": "Thanks for commenting. Here is the link: https://example.com",
 		"CAPTION_LINK_HOST": "keukenliefde.nl",
+		"RETENTION_DAYS": "30",
 		"DRY_RUN": "true"
 	},
 	"d1_databases": [
