@@ -296,7 +296,7 @@ class FeatureError extends Error {}
 function apiUrl(env: FeatureEnv, path: string): URL {
   try {
     const base = new URL(env.GRAPH_API_BASE);
-    if (base.protocol !== "https:" || base.hostname !== "graph.instagram.com" || base.username || base.password || base.port || base.search || base.hash || !/^\/v\d+\.\d+\/?$/.test(base.pathname)) throw new Error();
+    if (base.protocol !== "https:" || !["graph.instagram.com", "graph.facebook.com"].includes(base.hostname) || base.username || base.password || base.port || base.search || base.hash || !/^\/v\d+\.\d+\/?$/.test(base.pathname)) throw new Error();
     return new URL(`${base.href.replace(/\/$/, "")}/${path}`);
   } catch { throw new FeatureError("Use the official Instagram Graph API address."); }
 }

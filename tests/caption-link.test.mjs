@@ -25,11 +25,13 @@ test("only links to the allowed host are taken from a caption", () => {
     ["Link: (http://keukenliefde.nl/x?y=1#z)", "https://keukenliefde.nl/x?y=1#z"],
     ["Eerst iets anders https://example.com en dan KEUKENLIEFDE.NL/a", "https://keukenliefde.nl/a"],
     ["twee links keukenliefde.nl/een keukenliefde.nl/twee", "https://keukenliefde.nl/een"],
+    ["Staat op Keukenliefde.nl, of klik op de link in bio. Recept: https://www.keukenliefde.nl/zelfgemaakte-friet/", "https://www.keukenliefde.nl/zelfgemaakte-friet/"],
   ];
   for (const [caption, expected] of yes) assert.equal(extractCaptionLink(caption, HOST), expected, caption);
   const no = [
     "geen link hier", "https://example.com/keukenliefde.nl", "keukenliefde.nl.evil.com/recept", "evilkeukenliefde.nl/recept",
     "https://keukenliefde.nl@evil.com/recept", "@keukenliefde.nl", "", null, undefined,
+    "Het recept vind je op Keukenliefde.nl, of klik op de link in bio.", "https://www.keukenliefde.nl/",
   ];
   for (const caption of no) assert.equal(extractCaptionLink(caption, HOST), null, String(caption));
   assert.equal(extractCaptionLink("keukenliefde.nl/a", undefined), null);

@@ -34,6 +34,8 @@ type TokenRow = {
   safe_error: string | null;
 };
 
+// graph.facebook.com is "Unified login": a system-user token that never expires.
+const GRAPH_HOSTS = new Set(["graph.instagram.com", "graph.facebook.com"]);
 const DAY = 24 * 60 * 60 * 1000;
 const FIRST_REFRESH_DELAY = 2 * DAY;
 const REFRESH_INTERVAL = 30 * DAY;
@@ -145,7 +147,7 @@ export async function getInstagramAccessToken(env: InstagramTokenEnv, now = Date
 function graphBase(env: InstagramTokenEnv): URL {
   try {
     const url = new URL(env.GRAPH_API_BASE);
-    if (url.protocol !== "https:" || url.hostname !== "graph.instagram.com" || url.port ||
+    if (url.protocol !== "https:" || !GRAPH_HOSTS.has(url.hostname) || url.port ||
         url.username || url.password || url.search || url.hash || !/^\/v\d+\.\d+\/?$/.test(url.pathname)) {
       throw new Error("Unexpected Graph API URL");
     }
@@ -243,17 +245,18 @@ export async function maintainInstagramAccessToken(env: InstagramTokenEnv, now =
     }
     const base = graphBase(env);
     const token = await decryptToken(env, row);
-    const identityUrl = new URL(`${base.href.replace(/\/$/, "")}/me`);
-    identityUrl.searchParams.set("fields", "user_id,username");
+    const systemUser = base.hostname === "graph.facebook.com";
+    const identityUrl = new URL(`${base.href.replace(/\/$/, "")}/${systemUser ? encodeURIComponent(env.IG_USER_ID) : "me"}`);
+    identityUrl.searchParams.set("fields", systemUser ? "username" : "user_id,username");
     const identity = await graphRequest(identityUrl, token);
-    if (String(identity.user_id ?? "") !== env.IG_USER_ID) {
+    if (String(systemUser ? identity.id ?? "" : identity.user_id ?? "") !== env.IG_USER_ID) {
       throw new TokenError("This token belongs to a different Instagram account. Reconnect the correct account.", true);
     }
     const username = typeof identity.username === "string" && /^[A-Za-z0-9._]{1,30}$/.test(identity.username)
       ? identity.username : null;
     const tokenObservedAt = row.last_refreshed_at ?? row.first_observed_at;
     // Even a manually triggered check cannot renew a token during its first day.
-    if (now >= row.next_refresh_at && now >= tokenObservedAt + DAY) {
+    if (!systemUser && now >= row.next_refresh_at && now >= tokenObservedAt + DAY) {
       const refreshUrl = new URL("https://graph.instagram.com/refresh_access_token");
       refreshUrl.searchParams.set("grant_type", "ig_refresh_token");
       refreshUrl.searchParams.set("access_token", token);

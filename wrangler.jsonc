@@ -10,12 +10,14 @@
 	"triggers": {
 		"crons": ["0 6 * * *"]
 	},
+	"workers_dev": true,
+	"preview_urls": false,
 	"observability": {
 		"enabled": true,
 		"head_sampling_rate": 1
 	},
 	"vars": {
-		"GRAPH_API_BASE": "https://graph.instagram.com/v25.0",
+		"GRAPH_API_BASE": "https://graph.facebook.com/v25.0",
 		"KEYWORD": "",
 		"PRIVATE_REPLY_TEXT": "Thanks for commenting. Here is the link: https://example.com",
 		"CAPTION_LINK_HOST": "keukenliefde.nl",
@@ -26,7 +28,7 @@
 		{
 			"binding": "DB",
 			"database_name": "manychat-lite-cloudflare",
-			"database_id": "REPLACE_WITH_D1_DATABASE_ID",
+			"database_id": "95e6d105-d803-4f32-80fb-83e192a70898",
 			"migrations_dir": "./migrations"
 		}
 	]

@@ -257,3 +257,31 @@ test("Graph redirects are rejected without forwarding credentials or exposing th
   assert.equal(JSON.stringify(status).includes(destination), false);
   assert.equal(JSON.stringify(saved(h)).includes(destination), false);
 });
+
+test("a system-user token on graph.facebook.com is checked against the account and never renewed", async (t) => {
+  const h = await createHarness({}, { GRAPH_API_BASE: "https://graph.facebook.com/v25.0" });
+  t.after(() => h.dispose());
+  h.setResponder(() => Response.json({ id: h.env.IG_USER_ID, username: "test_owner" }));
+  await token.maintainInstagramAccessToken(h.env, NOW);
+  await h.db.prepare("UPDATE instagram_tokens SET next_refresh_at = ?").bind(NOW).run();
+  const status = await token.maintainInstagramAccessToken(h.env, NOW + 3 * DAY);
+  assert.equal(status.state, "healthy");
+  assert.equal(status.username, "test_owner");
+  assert.equal(status.expiresAt, null);
+  assert.equal(h.calls.length, 2);
+  for (const call of h.calls) {
+    assert.equal(call.url.host, "graph.facebook.com");
+    assert.equal(call.url.pathname, `/v25.0/${h.env.IG_USER_ID}`);
+    assert.equal(call.url.searchParams.get("fields"), "username");
+  }
+  assert.equal(await token.getInstagramAccessToken(h.env, NOW + 3 * DAY), h.env.INSTAGRAM_ACCESS_TOKEN);
+});
+
+test("a system-user token for another Instagram account asks to reconnect", async (t) => {
+  const h = await createHarness({}, { GRAPH_API_BASE: "https://graph.facebook.com/v25.0" });
+  t.after(() => h.dispose());
+  h.setResponder(() => Response.json({ id: "999", username: "someone_else" }));
+  const status = await token.maintainInstagramAccessToken(h.env, NOW);
+  assert.equal(status.state, "reconnect");
+  assert.equal(status.needsReconnect, true);
+});
